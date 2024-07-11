@@ -1,112 +1,134 @@
-//! A simple example to change colours of a WS2812/NeoPixel compatible LED.
-//!
-//! This example demonstrates the use of [`FixedLengthSignal`][crate::rmt::FixedLengthSignal] which
-//! lives on the stack and requires a known length before creating it.
-//!
-//! There is a similar implementation in the esp-idf project:
-//! https://github.com/espressif/esp-idf/tree/20847eeb96/examples/peripherals/rmt/led_strip
-//!
-//! Datasheet (PDF) for a WS2812, which explains how the pulses are to be sent:
-//! https://cdn-shop.adafruit.com/datasheets/WS2812.pdf
+use anyhow::Result;
+use core::str;
+use embedded_svc::{http::Method, io::Write};
+use esp_idf_svc::{
+    eventloop::EspSystemEventLoop,
+    hal::{
+        // i2c::{I2cConfig, I2cDriver},
+        io::EspIOError,
+        prelude::*,
+    },
+    http::server::{Configuration, EspHttpServer},
+};
+use log::info;
+use rgb_led::{RGB8, WS2812RMT};
+use std::{
+    sync::{Arc, Mutex},
+    thread::sleep,
+    time::Duration,
+};
+use wifi::wifi;
 
-use anyhow::{bail, Result};
-use core::time::Duration;
-use esp_idf_hal::delay::FreeRtos;
-use esp_idf_hal::peripherals::Peripherals;
-use esp_idf_hal::rmt::config::TransmitConfig;
-use esp_idf_hal::rmt::*;
+#[toml_cfg::toml_config]
+pub struct Config {
+    #[default("")]
+    wifi_ssid: &'static str,
+    #[default("")]
+    wifi_psk: &'static str,
+}
 
 fn main() -> Result<()> {
-    esp_idf_hal::sys::link_patches();
-    // Bind the log crate to the ESP Logging facilities
+    esp_idf_svc::sys::link_patches();
     esp_idf_svc::log::EspLogger::initialize_default();
 
-    log::info!("Hello, world!");
+    let peripherals = Peripherals::take().unwrap();
+    let sysloop = EspSystemEventLoop::take()?;
 
-    let peripherals = Peripherals::take()?;
-    // Onboard RGB LED pin
-    // ESP32-C3-DevKitC-02 gpio8, ESP32-C3-DevKit-RUST-1 gpio2
-    let led = peripherals.pins.gpio8;
-    let channel = peripherals.rmt.channel0;
-    let config = TransmitConfig::new().clock_divider(1);
-    let mut tx = TxRmtDriver::new(channel, led, &config)?;
+    let app_config = CONFIG;
 
-    // 3 seconds white at 10% brightness
-    neopixel(Rgb::new(25, 25, 25), &mut tx)?;
-    FreeRtos::delay_ms(3000);
+    let _wifi = wifi(
+        app_config.wifi_ssid,
+        app_config.wifi_psk,
+        peripherals.modem,
+        sysloop,
+    )?;
+    info!("Pre led");
 
-    // infinite rainbow loop at 20% brightness
-    (0..360).cycle().try_for_each(|hue| {
-        FreeRtos::delay_ms(10);
-        let rgb = Rgb::from_hsv(hue, 100, 20)?;
-        neopixel(rgb, &mut tx)
-    })
-}
-
-fn neopixel(rgb: Rgb, tx: &mut TxRmtDriver) -> Result<()> {
-    let color: u32 = rgb.into();
-    let ticks_hz = tx.counter_clock()?;
-    let (t0h, t0l, t1h, t1l) = (
-        Pulse::new_with_duration(ticks_hz, PinState::High, &Duration::from_nanos(350))?,
-        Pulse::new_with_duration(ticks_hz, PinState::Low, &Duration::from_nanos(800))?,
-        Pulse::new_with_duration(ticks_hz, PinState::High, &Duration::from_nanos(700))?,
-        Pulse::new_with_duration(ticks_hz, PinState::Low, &Duration::from_nanos(600))?,
-    );
-    let mut signal = FixedLengthSignal::<24>::new();
-    for i in (0..24).rev() {
-        let p = 2_u32.pow(i);
-        let bit: bool = p & color != 0;
-        let (high_pulse, low_pulse) = if bit { (t1h, t1l) } else { (t0h, t0l) };
-        signal.set(23 - i as usize, &(high_pulse, low_pulse))?;
+    // Wrap the led in an Arc<Mutex<...>>
+    let led = Arc::new(Mutex::new(WS2812RMT::new(peripherals.pins.gpio8, peripherals.rmt.channel0)?));
+    {
+        let mut led = led.lock().unwrap();
+        led.set_pixel(RGB8::new(50, 0, 0))?;
     }
-    tx.start_blocking(&signal)?;
-    Ok(())
-}
+    info!("Post led");
 
-struct Rgb {
-    r: u8,
-    g: u8,
-    b: u8,
-}
+    // Initialize temperature sensor
+    // let sda = peripherals.pins.gpio10;
+    // let scl = peripherals.pins.gpio8;
+    // let i2c = peripherals.i2c0;
+    // let config = I2cConfig::new().baudrate(100.kHz().into());
+    // let i2c = I2cDriver::new(i2c, sda, scl, &config)?;
+    // let temp_sensor_main = Arc::new(Mutex::new(shtc3(i2c)));
+    // let temp_sensor = temp_sensor_main.clone();
+    // temp_sensor
+    //     .lock()
+    //     .unwrap()
+    //     .start_measurement(PowerMode::NormalMode)
+    //     .unwrap();
 
-impl Rgb {
-    pub fn new(r: u8, g: u8, b: u8) -> Self {
-        Self { r, g, b }
-    }
-    /// Converts hue, saturation, value to RGB
-    pub fn from_hsv(h: u32, s: u32, v: u32) -> Result<Self> {
-        if h > 360 || s > 100 || v > 100 {
-            bail!("The given HSV values are not in valid range");
-        }
-        let s = s as f64 / 100.0;
-        let v = v as f64 / 100.0;
-        let c = s * v;
-        let x = c * (1.0 - (((h as f64 / 60.0) % 2.0) - 1.0).abs());
-        let m = v - c;
-        let (r, g, b) = match h {
-            0..=59 => (c, x, 0.0),
-            60..=119 => (x, c, 0.0),
-            120..=179 => (0.0, c, x),
-            180..=239 => (0.0, x, c),
-            240..=299 => (x, 0.0, c),
-            _ => (c, 0.0, x),
-        };
-        Ok(Self {
-            r: ((r + m) * 255.0) as u8,
-            g: ((g + m) * 255.0) as u8,
-            b: ((b + m) * 255.0) as u8,
-        })
+    let mut server = EspHttpServer::new(&Configuration::default())?;
+
+    // Clone the Arc to pass to the closure
+    let led_clone = led.clone();
+    server.fn_handler(
+        "/",
+        Method::Get,
+        move |request| -> core::result::Result<(), EspIOError> {
+            let html = index_html();
+            let mut response = request.into_ok_response()?;
+            response.write_all(html.as_bytes())?;
+            let mut led = led_clone.lock().unwrap();
+            let _ = led.set_pixel(RGB8::new(0, 50, 0));
+            Ok(())
+        },
+    )?;
+
+    // Clone the Arc to pass to the closure
+    let led_clone = led.clone();
+    server.fn_handler(
+        "/temperature",
+        Method::Get,
+        move |request| -> core::result::Result<(), EspIOError> {
+            let temp_val = 12.34;
+            let html = temperature(temp_val);
+            let mut response = request.into_ok_response()?;
+            response.write_all(html.as_bytes())?;
+            let mut led = led_clone.lock().unwrap();
+            let _ = led.set_pixel(RGB8::new(0, 0, 50));
+            Ok(())
+        },
+    )?;
+
+    println!("Server awaiting connection");
+
+    loop {
+        info!("tick");
+        sleep(Duration::from_millis(1000));
     }
 }
 
-impl From<Rgb> for u32 {
-    /// Convert RGB to u32 color value
-    ///
-    /// e.g. rgb: (1,2,4)
-    /// G        R        B
-    /// 7      0 7      0 7      0
-    /// 00000010 00000001 00000100
-    fn from(rgb: Rgb) -> Self {
-        ((rgb.r as u32) << 16) | ((rgb.g as u32) << 8) | rgb.b as u32
-    }
+fn templated(content: impl AsRef<str>) -> String {
+    format!(
+        r#"
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="utf-8">
+        <title>esp-rs web server</title>
+    </head>
+    <body>
+        {}
+    </body>
+</html>
+"#,
+        content.as_ref()
+    )
+}
+
+fn index_html() -> String {
+    templated("Hello from ESP32-C3!")
+}
+
+fn temperature(val: f32) -> String {
+    templated(format!("Chip temperature: {:.2}°C", val))
 }
