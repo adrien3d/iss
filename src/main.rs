@@ -4,7 +4,7 @@ use embedded_svc::{http::Method, io::Write};
 use esp_idf_svc::{
     eventloop::EspSystemEventLoop,
     hal::{
-        // i2c::{I2cConfig, I2cDriver},
+        i2c::{I2cConfig, I2cDriver},
         io::EspIOError,
         prelude::*,
     },
@@ -17,6 +17,7 @@ use std::{
     thread::sleep,
     time::Duration,
 };
+use tea5767::defs::{BandLimits, SearchAdcLevel, SearchStatus, SoundMode, TEA5767};
 use wifi::wifi;
 
 #[toml_cfg::toml_config]
@@ -45,7 +46,10 @@ fn main() -> Result<()> {
     info!("Pre led");
 
     // Wrap the led in an Arc<Mutex<...>>
-    let led = Arc::new(Mutex::new(WS2812RMT::new(peripherals.pins.gpio8, peripherals.rmt.channel0)?));
+    let led = Arc::new(Mutex::new(WS2812RMT::new(
+        peripherals.pins.gpio8,
+        peripherals.rmt.channel0,
+    )?));
     {
         let mut led = led.lock().unwrap();
         led.set_pixel(RGB8::new(50, 0, 0))?;
@@ -53,18 +57,14 @@ fn main() -> Result<()> {
     info!("Post led");
 
     // Initialize temperature sensor
-    // let sda = peripherals.pins.gpio10;
-    // let scl = peripherals.pins.gpio8;
-    // let i2c = peripherals.i2c0;
-    // let config = I2cConfig::new().baudrate(100.kHz().into());
-    // let i2c = I2cDriver::new(i2c, sda, scl, &config)?;
-    // let temp_sensor_main = Arc::new(Mutex::new(shtc3(i2c)));
-    // let temp_sensor = temp_sensor_main.clone();
-    // temp_sensor
-    //     .lock()
-    //     .unwrap()
-    //     .start_measurement(PowerMode::NormalMode)
-    //     .unwrap();
+    let sda = peripherals.pins.gpio6;
+    let scl = peripherals.pins.gpio7;
+    let i2c = peripherals.i2c0;
+    let config = I2cConfig::new().baudrate(400.kHz().into());
+    let i2c = I2cDriver::new(i2c, sda, scl, &config)?;
+
+    let mut radio_tuner =
+        TEA5767::new(i2c, 103.9, BandLimits::EuropeUS, SoundMode::Stereo).unwrap();
 
     let mut server = EspHttpServer::new(&Configuration::default())?;
 
@@ -82,6 +82,11 @@ fn main() -> Result<()> {
             Ok(())
         },
     )?;
+
+    radio_tuner.set_frequency(104.3).unwrap();
+    radio_tuner.mute();
+    // radio_tuner.set_standby();
+    // radio_tuner.reset_standby();
 
     // Clone the Arc to pass to the closure
     let led_clone = led.clone();
