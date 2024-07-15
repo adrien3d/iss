@@ -1,0 +1,60 @@
+<!DOCTYPE HTML>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ISS Radio Control</title>
+<style type="text/css">
+body {
+	max-width: 50em;
+	margin: auto;
+	padding: 1em;
+	font: 1em/1.65 sans-serif;
+}
+input {
+    width: 100%;
+    height: 3em;
+    margin-bottom: 1em;
+}
+</style>
+</head>
+<body>
+<form id="the-form" action="/post-radio-form" method="post" accept-charset="utf-8">
+<label for="fm-frequency">FM Frequency:</label>
+<input type="number" step="0.01" id="fm-frequency" name="fm_frequency" min="87.5" max="108" step="0.1"><br>
+<label for="web-station">Web Station:</label>
+<input type="text" id="web-station" name="web_station"><br>
+<input type="submit" value="Submit">
+</form>
+<p id="server-resp"></p>
+<script type="text/javascript">
+
+let theForm = document.getElementById("the-form");
+let serverResp = document.getElementById("server-resp");
+
+theForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+
+    let form = e.currentTarget;
+    let url = form.action;
+
+    try {
+        let entries = Object.fromEntries(new FormData(form).entries());
+        entries["fm_frequency"] = parseFloat(entries["fm_frequency"]);
+        let resp = await fetch(url, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                Accept: "application/json",
+            },
+            body: JSON.stringify(entries),
+        });
+        serverResp.innerText = await resp.text();
+    } catch (err) {
+        console.error(err);
+    }
+});
+
+</script>
+</body>
+</html>

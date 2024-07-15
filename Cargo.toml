@@ -40,6 +40,9 @@ toml-cfg = "0.2.0"
 rgb-led = { path = "lib/rgb-led" }
 wifi = { path = "lib/wifi" }
 embedded-svc = "0.28.0"
+tea5767 = "0.1.0"
+serde = "1.0.204"
+serde_json = "1.0.120"
 
 [build-dependencies]
 embuild = "0.32.0"
