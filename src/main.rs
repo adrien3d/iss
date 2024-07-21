@@ -1,10 +1,11 @@
 use anyhow::Result;
+use embedded_hal::i2c::I2c;
 use core::str;
 use embedded_svc::{
     http::{Headers, Method},
     io::Write,
 };
-use esp_idf_hal::io::Read;
+use esp_idf_hal::{gpio::{AnyOutputPin, Output, OutputPin, PinDriver}, io::Read};
 use esp_idf_svc::{
     eventloop::EspSystemEventLoop,
     hal::{
@@ -40,6 +41,77 @@ struct FormData<'a> {
 
 const MAX_CONTROL_PAYLOAD_LEN: usize = 128;
 static CONTROL_RADIO_HTML: &str = include_str!("control-radio.html");
+
+const SI4703_I2C_ADDR: u8 = 0x10;
+
+struct Si4703<I2C> {
+    i2c: I2C,
+    // sen: GpioPin<Output>,
+    // rst: GpioPin<Output>,
+    // gpio1: GpioPin<Output>,
+    // gpio2: GpioPin<Output>,
+}
+
+impl<I2C, E> Si4703<I2C>
+where
+    I2C: I2c<Error = E>,
+{
+    pub fn new(i2c: I2C, /*sen: PinDriver<OutputPin, Output>, rst: AnyOutputPin<Output>, gpio1: GpioPin<Output>, gpio2: GpioPin<Output>*/) -> Result<Self, E> {
+        //let sen_pin = PinDriver::output(sen);
+        let mut radio = Si4703 { i2c};//, sen: sen_pin, rst, gpio1, gpio2 };
+
+        // Initialize control pins
+        // radio.sen.set_high()?;
+        // radio.gpio1.set_high()?;
+        // radio.gpio2.set_high()?;
+
+        // Perform necessary initialization
+        // Example: reset command
+        let init_command = [0x02];
+        radio.i2c.write(SI4703_I2C_ADDR, &init_command)?;
+
+        // Reset the SI4703
+        radio.reset()?;
+
+        // Delay to allow the device to reset
+        sleep(Duration::from_millis(100));
+
+        Ok(radio)
+    }
+
+    pub fn reset(&mut self) -> Result<(), E> {
+        // Toggle the RST pin to reset the device
+        // self.rst.set_low()?;
+        sleep(Duration::from_millis(10));
+        // self.rst.set_high()?;
+        sleep(Duration::from_millis(10));
+
+        Ok(())
+    }
+
+    pub fn set_volume(&mut self, volume: u8) -> Result<(), E> {
+        // Volume should be between 0 and 15
+        assert!(volume <= 15);
+
+        // Example command to set volume
+        let volume_command = [0x05, volume << 4];
+        self.i2c.write(SI4703_I2C_ADDR, &volume_command)?;
+
+        Ok(())
+    }
+
+    pub fn tune(&mut self, frequency: u16) -> Result<(), E> {
+        // Frequency in 10 kHz steps (e.g., 1011 for 101.1 MHz)
+        let frequency_command = [
+            0x03,
+            (frequency >> 8) as u8,
+            (frequency & 0xFF) as u8,
+        ];
+        self.i2c.write(SI4703_I2C_ADDR, &frequency_command)?;
+
+        Ok(())
+    }
+}
 
 fn main() -> Result<()> {
     esp_idf_svc::sys::link_patches();
@@ -77,7 +149,21 @@ fn main() -> Result<()> {
     let gpio1 = peripherals.pins.gpio10;
     let gpio2 = peripherals.pins.gpio11;
     let config = I2cConfig::new().baudrate(400.kHz().into());
+    println!("config ok");
     let i2c = I2cDriver::new(peripherals.i2c0, sda, scl, &config)?;
+    println!("i2c ok");
+
+    let mut si4703 = Si4703::new(i2c)?;//, sen, rst, gpio1, gpio2)?;
+    println!("si4703 created");
+
+    // Set volume to max
+    si4703.set_volume(15)?;
+    println!("Volume set to 15");
+
+    // Tune to a frequency (e.g., 103.9 MHz)
+    si4703.tune(1039)?;
+
+    println!("Tuned to 103.9 MHz");
 
     // let radio_tuner = Arc::new(Mutex::new(
     //     TEA5767::new(i2c, 103.9, BandLimits::EuropeUS, SoundMode::Stereo).unwrap(),
