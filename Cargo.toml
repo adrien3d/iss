@@ -39,10 +39,14 @@ log = { version = "0.4", default-features = false }
 toml-cfg = "0.2.0"
 rgb-led = { path = "lib/rgb-led" }
 wifi = { path = "lib/wifi" }
+si470x = { path = "lib/si470x" }
 embedded-svc = "0.28.0"
 tea5767 = "0.1.0"
 serde = "1.0.204"
 serde_json = "1.0.120"
+si4703 = "0.1.0"
+embedded-hal = "1.0.0"
+esp-idf-sys = "0.35.0"
 
 [build-dependencies]
 embuild = "0.32.0"

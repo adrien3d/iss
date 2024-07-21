@@ -22,7 +22,6 @@ use std::{
     thread::sleep,
     time::Duration,
 };
-use tea5767::defs::{BandLimits, SoundMode, TEA5767};
 use wifi::wifi;
 
 #[toml_cfg::toml_config]
@@ -73,13 +72,27 @@ fn main() -> Result<()> {
     // Initialize radio tuner
     let sda = peripherals.pins.gpio6;
     let scl = peripherals.pins.gpio7;
-    let i2c = peripherals.i2c0;
+    let sen = peripherals.pins.gpio0;
+    let rst = peripherals.pins.gpio1;
+    let gpio1 = peripherals.pins.gpio10;
+    let gpio2 = peripherals.pins.gpio11;
     let config = I2cConfig::new().baudrate(400.kHz().into());
-    let i2c = I2cDriver::new(i2c, sda, scl, &config)?;
+    let i2c = I2cDriver::new(peripherals.i2c0, sda, scl, &config)?;
 
-    let radio_tuner = Arc::new(Mutex::new(
-        TEA5767::new(i2c, 103.9, BandLimits::EuropeUS, SoundMode::Stereo).unwrap(),
-    ));
+    // let radio_tuner = Arc::new(Mutex::new(
+    //     TEA5767::new(i2c, 103.9, BandLimits::EuropeUS, SoundMode::Stereo).unwrap(),
+    // ));
+    // let mut radio = Si4703::new(i2c);
+    // radio.enable_oscillator().map_err(|e| format!("Enable oscillator error: {:?}", e));
+    // sleep(Duration::from_millis(500));
+    // radio.enable().map_err(|e| format!("Enable error: {:?}", e));
+    // sleep(Duration::from_millis(110));
+
+    // radio.set_volume(Volume::Dbfsm28).map_err(|e| format!("Volume error: {:?}", e));
+    // radio.set_deemphasis(DeEmphasis::Us50).map_err(|e| format!("Deemphasis error: {:?}", e));
+    // radio.set_channel_spacing(ChannelSpacing::Khz100).map_err(|e| format!("Channel spacing error: {:?}", e));
+    // radio.unmute().map_err(|e: si4703::Error<esp_idf_hal::i2c::I2cError>| format!("Unmute error: {:?}", e));
+    
 
     let mut server = EspHttpServer::new(&Configuration::default())?;
 
@@ -105,7 +118,7 @@ fn main() -> Result<()> {
     })?;
 
     let led_clone = led.clone();
-    let radio_tuner_clone = radio_tuner.clone();
+    // let radio_tuner_clone = radio_tuner.clone();
     server.fn_handler::<anyhow::Error, _>("/post-radio-form", Method::Post, move |mut req| {
         let len = req.content_len().unwrap_or(0) as usize;
 
@@ -120,12 +133,12 @@ fn main() -> Result<()> {
         let mut resp = req.into_ok_response()?;
 
         if let Ok(form) = serde_json::from_slice::<FormData>(&buf) {
-            let mut radio_tuner = radio_tuner_clone
-                .lock()
-                .map_err(|_| anyhow::anyhow!("Failed to lock radio tuner mutex"))?;
-            radio_tuner
-                .set_frequency(form.fm_frequency)
-                .map_err(|_| anyhow::anyhow!("Failed to set radio tuner frequency"))?;
+            // let mut radio_tuner = radio_tuner_clone
+            //     .lock()
+            //     .map_err(|_| anyhow::anyhow!("Failed to lock radio tuner mutex"))?;
+            // radio_tuner
+            //     .set_frequency(form.fm_frequency)
+            //     .map_err(|_| anyhow::anyhow!("Failed to set radio tuner frequency"))?;
             let mut led = led_clone.lock().unwrap();
             let _ = led.set_pixel(RGB8::new(0, 0, 0));
             sleep(Duration::from_millis(100));
