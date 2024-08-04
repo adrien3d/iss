@@ -1,4 +1,5 @@
 use anyhow::Result;
+use radios::Station;
 use tea5767::defs::{BandLimits, SoundMode, TEA5767};
 use core::str;
 use embedded_svc::{
@@ -25,6 +26,7 @@ use std::{
 };
 use wifi::wifi;
 
+mod radios;
 #[toml_cfg::toml_config]
 pub struct Config {
     #[default("")]
@@ -35,8 +37,9 @@ pub struct Config {
 
 #[derive(Deserialize)]
 struct FormData<'a> {
-    fm_frequency: f32,
-    web_station: &'a str,
+    // fm_frequency: f32,
+    station: &'a str,
+    is_webradio: bool
 }
 
 const MAX_CONTROL_PAYLOAD_LEN: usize = 128;
@@ -73,10 +76,10 @@ fn main() -> Result<()> {
     // Initialize radio tuner
     let sda = peripherals.pins.gpio6;
     let scl = peripherals.pins.gpio7;
-    let sen = peripherals.pins.gpio0;
-    let rst = peripherals.pins.gpio1;
-    let gpio1 = peripherals.pins.gpio10;
-    let gpio2 = peripherals.pins.gpio11;
+    let _sen = peripherals.pins.gpio0;
+    let _rst = peripherals.pins.gpio1;
+    let _gpio1 = peripherals.pins.gpio10;
+    let _gpio2 = peripherals.pins.gpio11;
     let config = I2cConfig::new().baudrate(400.kHz().into());
     let i2c = I2cDriver::new(peripherals.i2c0, sda, scl, &config)?;
 
@@ -134,20 +137,32 @@ fn main() -> Result<()> {
         let mut resp = req.into_ok_response()?;
 
         if let Ok(form) = serde_json::from_slice::<FormData>(&buf) {
-            let mut radio_tuner = radio_tuner_clone
-                .lock()
-                .map_err(|_| anyhow::anyhow!("Failed to lock radio tuner mutex"))?;
-            radio_tuner
-                .set_frequency(form.fm_frequency)
-                .map_err(|_| anyhow::anyhow!("Failed to set radio tuner frequency"))?;
-            let mut led = led_clone.lock().unwrap();
-            let _ = led.set_pixel(RGB8::new(0, 0, 0));
-            sleep(Duration::from_millis(100));
-            let _ = led.set_pixel(RGB8::new(0, 50, 0));
+            if !form.is_webradio {
+                let fm_frequency = Station::get_fm_frequency("france_inter");
+                match fm_frequency {
+                    Some(freq) => {
+                        let mut radio_tuner = radio_tuner_clone
+                            .lock()
+                            .map_err(|_| anyhow::anyhow!("Failed to lock radio tuner mutex"))?;
+                        radio_tuner
+                            .set_frequency(freq)
+                            .map_err(|_| anyhow::anyhow!("Failed to set radio tuner frequency"))?;
+                        let mut led = led_clone.lock().unwrap();
+                        let _ = led.set_pixel(RGB8::new(0, 0, 0));
+                        sleep(Duration::from_millis(100));
+                        let _ = led.set_pixel(RGB8::new(0, 50, 0));
+                    },
+                    None => println!("Radio not found"),
+                }
+            } else {
+
+            }
             write!(
                 resp,
-                "Requested {} FM and {} station",
-                form.fm_frequency, form.web_station
+                "Requested {} station and {} webradio",
+                form.station, form.is_webradio
+                // "Requested {} FM and {} station",
+                // form.fm_frequency, form.web_station
             )?;
         } else {
             resp.write_all("JSON error".as_bytes())?;
