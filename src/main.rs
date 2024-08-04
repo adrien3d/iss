@@ -1,4 +1,5 @@
 use anyhow::Result;
+use tea5767::defs::{BandLimits, SoundMode, TEA5767};
 use core::str;
 use embedded_svc::{
     http::{Headers, Method},
@@ -79,9 +80,9 @@ fn main() -> Result<()> {
     let config = I2cConfig::new().baudrate(400.kHz().into());
     let i2c = I2cDriver::new(peripherals.i2c0, sda, scl, &config)?;
 
-    // let radio_tuner = Arc::new(Mutex::new(
-    //     TEA5767::new(i2c, 103.9, BandLimits::EuropeUS, SoundMode::Stereo).unwrap(),
-    // ));
+    let radio_tuner = Arc::new(Mutex::new(
+        TEA5767::new(i2c, 103.9, BandLimits::EuropeUS, SoundMode::Stereo).unwrap(),
+    ));
     // let mut radio = Si4703::new(i2c);
     // radio.enable_oscillator().map_err(|e| format!("Enable oscillator error: {:?}", e));
     // sleep(Duration::from_millis(500));
@@ -118,7 +119,7 @@ fn main() -> Result<()> {
     })?;
 
     let led_clone = led.clone();
-    // let radio_tuner_clone = radio_tuner.clone();
+    let radio_tuner_clone = radio_tuner.clone();
     server.fn_handler::<anyhow::Error, _>("/post-radio-form", Method::Post, move |mut req| {
         let len = req.content_len().unwrap_or(0) as usize;
 
@@ -133,12 +134,12 @@ fn main() -> Result<()> {
         let mut resp = req.into_ok_response()?;
 
         if let Ok(form) = serde_json::from_slice::<FormData>(&buf) {
-            // let mut radio_tuner = radio_tuner_clone
-            //     .lock()
-            //     .map_err(|_| anyhow::anyhow!("Failed to lock radio tuner mutex"))?;
-            // radio_tuner
-            //     .set_frequency(form.fm_frequency)
-            //     .map_err(|_| anyhow::anyhow!("Failed to set radio tuner frequency"))?;
+            let mut radio_tuner = radio_tuner_clone
+                .lock()
+                .map_err(|_| anyhow::anyhow!("Failed to lock radio tuner mutex"))?;
+            radio_tuner
+                .set_frequency(form.fm_frequency)
+                .map_err(|_| anyhow::anyhow!("Failed to set radio tuner frequency"))?;
             let mut led = led_clone.lock().unwrap();
             let _ = led.set_pixel(RGB8::new(0, 0, 0));
             sleep(Duration::from_millis(100));
