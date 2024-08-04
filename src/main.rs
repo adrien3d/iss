@@ -16,7 +16,7 @@ use esp_idf_svc::{
     },
     http::server::{Configuration, EspHttpServer},
 };
-use log::info;
+use log::{info, warn};
 use rgb_led::{RGB8, WS2812RMT};
 use serde::Deserialize;
 use std::{
@@ -35,7 +35,7 @@ pub struct Config {
     wifi_psk: &'static str,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 struct FormData<'a> {
     // fm_frequency: f32,
     station: &'a str,
@@ -138,7 +138,7 @@ fn main() -> Result<()> {
 
         if let Ok(form) = serde_json::from_slice::<FormData>(&buf) {
             if !form.is_webradio {
-                let fm_frequency = Station::get_fm_frequency("france_inter");
+                let fm_frequency = Station::get_fm_frequency(form.station);
                 match fm_frequency {
                     Some(freq) => {
                         let mut radio_tuner = radio_tuner_clone
@@ -147,15 +147,23 @@ fn main() -> Result<()> {
                         radio_tuner
                             .set_frequency(freq)
                             .map_err(|_| anyhow::anyhow!("Failed to set radio tuner frequency"))?;
+                        info!("FM Radio set to: {:?}, frequency:{}", form, freq);
                         let mut led = led_clone.lock().unwrap();
                         let _ = led.set_pixel(RGB8::new(0, 0, 0));
                         sleep(Duration::from_millis(100));
                         let _ = led.set_pixel(RGB8::new(0, 50, 0));
                     },
-                    None => println!("Radio not found"),
+                    None => warn!("FM Radio {:?} not found", form)
                 }
             } else {
-
+                let station_url = Station::get_web_url(form.station);
+                match station_url {
+                    Some(url) => {
+                        
+                        info!("WebRadio set to: {:?}, URL:{}", form, url);
+                    },
+                    None => warn!("Webradio {:?} not found", form)
+                }
             }
             write!(
                 resp,
