@@ -183,6 +183,8 @@ fn main() -> Result<()> {
     // let _ = radio_tuner.mute();
     // radio_tuner.set_standby();
     // radio_tuner.reset_standby();
+    // radio_tuner.set_soft_mute();
+    // radio_tuner.search_up();
 
     println!("Server awaiting connection");
 
