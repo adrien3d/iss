@@ -136,6 +136,7 @@ fn main() -> Result<()> {
         let mut resp = req.into_ok_response()?;
 
         if let Ok(form) = serde_json::from_slice::<FormData>(&buf) {
+            let station_name = Station::get_name(form.station);
             if !form.is_webradio {
                 let fm_frequency = Station::get_fm_frequency(form.station);
                 match fm_frequency {
@@ -152,7 +153,7 @@ fn main() -> Result<()> {
                         sleep(Duration::from_millis(100));
                         let _ = led.set_pixel(RGB8::new(0, 50, 0));
                     }
-                    None => warn!("FM Radio {:?} not found", form),
+                    None => warn!("FM Radio {:?} [{:?}] not found", station_name, form),
                 }
             } else {
                 let station_url = Station::get_web_url(form.station);
@@ -160,7 +161,7 @@ fn main() -> Result<()> {
                     Some(url) => {
                         info!("WebRadio set to: {:?}, URL:{}", form, url);
                     }
-                    None => warn!("Webradio {:?} not found", form),
+                    None => warn!("Webradio {:?} [{:?}] not found", station_name, form),
                 }
             }
             write!(
