@@ -1,6 +1,4 @@
 use anyhow::Result;
-use radios::Station;
-use tea5767::defs::{BandLimits, SoundMode, TEA5767};
 use core::str;
 use embedded_svc::{
     http::{Headers, Method},
@@ -17,6 +15,7 @@ use esp_idf_svc::{
     http::server::{Configuration, EspHttpServer},
 };
 use log::{info, warn};
+use radios::Station;
 use rgb_led::{RGB8, WS2812RMT};
 use serde::Deserialize;
 use std::{
@@ -24,6 +23,7 @@ use std::{
     thread::sleep,
     time::Duration,
 };
+use tea5767::defs::{BandLimits, SoundMode, TEA5767};
 use wifi::wifi;
 
 mod radios;
@@ -39,7 +39,7 @@ pub struct Config {
 struct FormData<'a> {
     // fm_frequency: f32,
     station: &'a str,
-    is_webradio: bool
+    is_webradio: bool,
 }
 
 const MAX_CONTROL_PAYLOAD_LEN: usize = 128;
@@ -96,7 +96,6 @@ fn main() -> Result<()> {
     // radio.set_deemphasis(DeEmphasis::Us50).map_err(|e| format!("Deemphasis error: {:?}", e));
     // radio.set_channel_spacing(ChannelSpacing::Khz100).map_err(|e| format!("Channel spacing error: {:?}", e));
     // radio.unmute().map_err(|e: si4703::Error<esp_idf_hal::i2c::I2cError>| format!("Unmute error: {:?}", e));
-    
 
     let mut server = EspHttpServer::new(&Configuration::default())?;
 
@@ -152,25 +151,24 @@ fn main() -> Result<()> {
                         let _ = led.set_pixel(RGB8::new(0, 0, 0));
                         sleep(Duration::from_millis(100));
                         let _ = led.set_pixel(RGB8::new(0, 50, 0));
-                    },
-                    None => warn!("FM Radio {:?} not found", form)
+                    }
+                    None => warn!("FM Radio {:?} not found", form),
                 }
             } else {
                 let station_url = Station::get_web_url(form.station);
                 match station_url {
                     Some(url) => {
-                        
                         info!("WebRadio set to: {:?}, URL:{}", form, url);
-                    },
-                    None => warn!("Webradio {:?} not found", form)
+                    }
+                    None => warn!("Webradio {:?} not found", form),
                 }
             }
             write!(
                 resp,
                 "Requested {} station and {} webradio",
-                form.station, form.is_webradio
-                // "Requested {} FM and {} station",
-                // form.fm_frequency, form.web_station
+                form.station,
+                form.is_webradio // "Requested {} FM and {} station",
+                                 // form.fm_frequency, form.web_station
             )?;
         } else {
             resp.write_all("JSON error".as_bytes())?;
