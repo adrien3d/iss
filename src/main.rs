@@ -13,11 +13,13 @@ use esp_idf_svc::{
         prelude::*,
     },
     http::server::{Configuration, EspHttpServer},
+    nvs::*,
 };
 use log::{info, warn};
+use postcard::{from_bytes, to_vec};
 use radios::Station;
 use rgb_led::{RGB8, WS2812RMT};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::{
     sync::{Arc, Mutex},
     thread::sleep,
@@ -42,6 +44,13 @@ struct FormData<'a> {
     is_webradio: bool,
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+struct LastConfiguration<'a> {
+    last_source: &'a str,
+    last_station: &'a str,
+    last_volume: u8,
+}
+
 const MAX_CONTROL_PAYLOAD_LEN: usize = 128;
 static CONTROL_RADIO_HTML: &str = include_str!("control-radio.html");
 
@@ -49,17 +58,41 @@ fn main() -> Result<()> {
     esp_idf_svc::sys::link_patches();
     esp_idf_svc::log::EspLogger::initialize_default();
 
-    // Initialize the default NVS partition
-    let nvs_default = esp_idf_hal::nvs::Nvs::default().expect("Failed to initialize NVS");
+    let nvs_default_partition: EspNvsPartition<NvsDefault> = EspDefaultNvsPartition::take()?;
 
-    // Open an NVS namespace for storing data
-    let mut nvs = nvs_default
-        .open("storage", esp_idf_hal::nvs::NvsOpenMode::ReadWrite)
-        .expect("Failed to open NVS namespace");
+    let test_namespace = "test_ns";
+    let nvs = match EspNvs::new(nvs_default_partition.clone(), test_namespace, true) {
+        Ok(nvs) => {
+            info!("Got namespace {:?} from default partition", test_namespace);
+            nvs
+        }
+        Err(e) => panic!("Could't get namespace {:?}", e),
+    };
 
-    nvs.set_str("last_source", "fm").expect("Failed to set last_source at startup");
-    nvs.set_str("last_station", "france_info").expect("Failed to set last_station at startup");
-    nvs.set_str("last_volume", "50").expect("Failed to set last_volume at startup");
+    let key_raw_struct: &str = "last_configuration";
+    let key_raw_struct_data: &mut [u8] = &mut [0; 100];
+    let mut last_configuration = LastConfiguration {
+        last_source: "fm",
+        last_station: "france_info",
+        last_volume: 50,
+    };
+
+    match nvs.get_raw(key_raw_struct, key_raw_struct_data) {
+        Ok(v) => {
+            if let Some(the_struct) = v {
+                info!(
+                    "{:?} = {:#?}",
+                    key_raw_struct,
+                    from_bytes::<LastConfiguration>(the_struct)
+                );
+                match from_bytes::<LastConfiguration>(the_struct) {
+                    Ok(res) => last_configuration = res,
+                    Err(e) => warn!("Converting {:#?} failed because: {:?}", the_struct, e),
+                }
+            }
+        }
+        Err(e) => warn!("Couldn't get key {} because {:?}", key_raw_struct, e),
+    };
 
     let peripherals = Peripherals::take().unwrap();
     let sysloop = EspSystemEventLoop::take()?;
@@ -88,8 +121,18 @@ fn main() -> Result<()> {
     let config = I2cConfig::new().baudrate(400.kHz().into());
     let i2c = I2cDriver::new(peripherals.i2c0, sda, scl, &config)?;
 
+    let default_station_frequency =
+        // Station::get_fm_frequency_from_id("france_info").unwrap_or(105.5);
+        Station::get_fm_frequency_from_id(last_configuration.last_station).unwrap_or(105.5);
+
     let radio_tuner = Arc::new(Mutex::new(
-        TEA5767::new(i2c, , BandLimits::EuropeUS, SoundMode::Stereo).unwrap(),
+        TEA5767::new(
+            i2c,
+            default_station_frequency,
+            BandLimits::EuropeUS,
+            SoundMode::Stereo,
+        )
+        .unwrap(),
     ));
 
     let _wifi = wifi(
@@ -148,10 +191,12 @@ fn main() -> Result<()> {
         let mut resp = req.into_ok_response()?;
 
         if let Ok(form) = serde_json::from_slice::<FormData>(&buf) {
-            let station_name = Station::get_name(form.station);
+            let station_name = Station::get_name_from_id(form.station);
+            let last_source: &str;
+            let last_station: &str = form.station;
             if !form.is_webradio {
-                nvs.set_str("last_source", "fm").expect("Failed to set last_source at runtime");
-                let fm_frequency = Station::get_fm_frequency(form.station);
+                last_source = "fm";
+                let fm_frequency = Station::get_fm_frequency_from_id(form.station);
                 match fm_frequency {
                     Some(freq) => {
                         let mut radio_tuner = radio_tuner_clone
@@ -161,7 +206,7 @@ fn main() -> Result<()> {
                             .set_frequency(freq)
                             .map_err(|_| anyhow::anyhow!("Failed to set radio tuner frequency"))?;
                         info!("FM Radio set to: {:?}, frequency:{}", form, freq);
-                        nvs.set_str("last_station", form.station).expect("Failed to set last_station at runtime");
+
                         let mut led = led_clone.lock().unwrap();
                         let _ = led.set_pixel(RGB8::new(0, 0, 0));
                         sleep(Duration::from_millis(100));
@@ -170,16 +215,32 @@ fn main() -> Result<()> {
                     None => warn!("FM Radio {:?} [{:?}] not found", station_name, form),
                 }
             } else {
-                nvs.set_str("last_source", "webradio").expect("Failed to set last_source at runtime");
-                let station_url = Station::get_web_url(form.station);
+                last_source = "webradio";
+                let station_url = Station::get_web_url_from_id(form.station);
                 match station_url {
                     Some(url) => {
-                        nvs.set_str("last_station", form.station).expect("Failed to set last_station at runtime");
                         info!("WebRadio set to: {:?}, URL:{}", form, url);
                     }
                     None => warn!("Webradio {:?} [{:?}] not found", station_name, form),
                 }
             }
+            let key_raw_struct_data = LastConfiguration {
+                last_source,
+                last_station,
+                last_volume: 50,
+            };
+            let mut nvs_clone =
+                EspNvs::new(nvs_default_partition.clone(), test_namespace, true).unwrap();
+            nvs_clone
+                .set_str("last_station", form.station)
+                .expect("Failed to set last_station at runtime");
+            match nvs_clone.set_raw(
+                key_raw_struct,
+                &to_vec::<LastConfiguration, 100>(&key_raw_struct_data).unwrap(),
+            ) {
+                Ok(_) => info!("Key {} updated", key_raw_struct),
+                Err(e) => info!("key {} not updated {:?}", key_raw_struct, e),
+            };
             write!(
                 resp,
                 "Requested {} station and {} webradio",
@@ -202,7 +263,6 @@ fn main() -> Result<()> {
     // radio_tuner.search_up();
 
     warn!("Server awaiting connection");
-
 
     loop {
         info!("tick");

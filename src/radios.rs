@@ -117,7 +117,7 @@ static STATIONS: [Station; 18] = [
 ];
 
 impl Station<'_> {
-    pub fn get_name(id: &str) -> Option<&str> {
+    pub fn get_name_from_id(id: &str) -> Option<&str> {
         for station in &STATIONS {
             if station.id == id {
                 return Some(station.name);
@@ -126,7 +126,7 @@ impl Station<'_> {
         None
     }
 
-    pub fn get_fm_frequency(id: &str) -> Option<f32> {
+    pub fn get_fm_frequency_from_id(id: &str) -> Option<f32> {
         for station in &STATIONS {
             if station.id == id {
                 return Some(station.fm_frequency);
@@ -135,7 +135,7 @@ impl Station<'_> {
         None
     }
 
-    pub fn get_web_url(id: &str) -> Option<&str> {
+    pub fn get_web_url_from_id(id: &str) -> Option<&str> {
         for station in &STATIONS {
             if station.id == id {
                 return Some(station.web_url);
