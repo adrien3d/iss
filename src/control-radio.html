@@ -43,8 +43,8 @@ input {
     <option value="rtl2">RTL2</option>
     <option value="tsf_jazz">TSF Jazz</option>
 </select>
-<input type="checkbox" id="is_webradio" name="is_webradio"> <!-- value=""-->
 <label for="is_webradio">Webradio</label><br>
+<input type="checkbox" id="is_webradio" name="is_webradio"> <!-- value=""-->
 <input type="submit" value="Submit">
 </form>
 <p id="server-resp"></p>
@@ -61,7 +61,7 @@ theForm.addEventListener("submit", async (e) => {
 
     try {
         let entries = Object.fromEntries(new FormData(form).entries());
-        //entries["fm_frequency"] = parseFloat(entries["fm_frequency"]);
+        entries["is_webradio"] = Boolean(entries["is_webradio"]);
         let resp = await fetch(url, {
             method: "POST",
             headers: {
@@ -72,6 +72,7 @@ theForm.addEventListener("submit", async (e) => {
         });
         serverResp.innerText = await resp.text();
     } catch (err) {
+        serverResp.innerText = err;
         console.error(err);
     }
 });
