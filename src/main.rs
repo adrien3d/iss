@@ -49,19 +49,24 @@ fn main() -> Result<()> {
     esp_idf_svc::sys::link_patches();
     esp_idf_svc::log::EspLogger::initialize_default();
 
+    // Initialize the default NVS partition
+    let nvs_default = esp_idf_hal::nvs::Nvs::default().expect("Failed to initialize NVS");
+
+    // Open an NVS namespace for storing data
+    let mut nvs = nvs_default
+        .open("storage", esp_idf_hal::nvs::NvsOpenMode::ReadWrite)
+        .expect("Failed to open NVS namespace");
+
+    nvs.set_str("last_source", "fm").expect("Failed to set last_source at startup");
+    nvs.set_str("last_station", "france_info").expect("Failed to set last_station at startup");
+    nvs.set_str("last_volume", "50").expect("Failed to set last_volume at startup");
+
     let peripherals = Peripherals::take().unwrap();
     let sysloop = EspSystemEventLoop::take()?;
 
     let app_config = CONFIG;
 
-    let _wifi = wifi(
-        app_config.wifi_ssid,
-        app_config.wifi_psk,
-        peripherals.modem,
-        sysloop,
-    )?;
     info!("Pre led");
-
     // Wrap the led in an Arc<Mutex<...>>
     let led = Arc::new(Mutex::new(WS2812RMT::new(
         peripherals.pins.gpio8,
@@ -84,8 +89,15 @@ fn main() -> Result<()> {
     let i2c = I2cDriver::new(peripherals.i2c0, sda, scl, &config)?;
 
     let radio_tuner = Arc::new(Mutex::new(
-        TEA5767::new(i2c, 103.9, BandLimits::EuropeUS, SoundMode::Stereo).unwrap(),
+        TEA5767::new(i2c, , BandLimits::EuropeUS, SoundMode::Stereo).unwrap(),
     ));
+
+    let _wifi = wifi(
+        app_config.wifi_ssid,
+        app_config.wifi_psk,
+        peripherals.modem,
+        sysloop,
+    )?;
     // let mut radio = Si4703::new(i2c);
     // radio.enable_oscillator().map_err(|e| format!("Enable oscillator error: {:?}", e));
     // sleep(Duration::from_millis(500));
@@ -138,6 +150,7 @@ fn main() -> Result<()> {
         if let Ok(form) = serde_json::from_slice::<FormData>(&buf) {
             let station_name = Station::get_name(form.station);
             if !form.is_webradio {
+                nvs.set_str("last_source", "fm").expect("Failed to set last_source at runtime");
                 let fm_frequency = Station::get_fm_frequency(form.station);
                 match fm_frequency {
                     Some(freq) => {
@@ -148,6 +161,7 @@ fn main() -> Result<()> {
                             .set_frequency(freq)
                             .map_err(|_| anyhow::anyhow!("Failed to set radio tuner frequency"))?;
                         info!("FM Radio set to: {:?}, frequency:{}", form, freq);
+                        nvs.set_str("last_station", form.station).expect("Failed to set last_station at runtime");
                         let mut led = led_clone.lock().unwrap();
                         let _ = led.set_pixel(RGB8::new(0, 0, 0));
                         sleep(Duration::from_millis(100));
@@ -156,9 +170,11 @@ fn main() -> Result<()> {
                     None => warn!("FM Radio {:?} [{:?}] not found", station_name, form),
                 }
             } else {
+                nvs.set_str("last_source", "webradio").expect("Failed to set last_source at runtime");
                 let station_url = Station::get_web_url(form.station);
                 match station_url {
                     Some(url) => {
+                        nvs.set_str("last_station", form.station).expect("Failed to set last_station at runtime");
                         info!("WebRadio set to: {:?}, URL:{}", form, url);
                     }
                     None => warn!("Webradio {:?} [{:?}] not found", station_name, form),
@@ -185,7 +201,8 @@ fn main() -> Result<()> {
     // radio_tuner.set_soft_mute();
     // radio_tuner.search_up();
 
-    println!("Server awaiting connection");
+    warn!("Server awaiting connection");
+
 
     loop {
         info!("tick");
