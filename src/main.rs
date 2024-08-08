@@ -16,6 +16,7 @@ use esp_idf_svc::{
     nvs::*,
 };
 use log::{info, warn};
+mod ntp;
 use postcard::{from_bytes, to_vec};
 use radios::Station;
 use rgb_led::{RGB8, WS2812RMT};
@@ -49,6 +50,11 @@ struct LastConfiguration<'a> {
     last_source: &'a str,
     last_station: &'a str,
     last_volume: u8,
+}
+
+struct ProgramAppState {
+    /// A Network Time Protocol used as a time source.
+    //ntp: ntp::Ntp,
 }
 
 const MAX_CONTROL_PAYLOAD_LEN: usize = 128;
@@ -146,6 +152,8 @@ fn main() -> Result<()> {
     // sleep(Duration::from_millis(500));
     // radio.enable().map_err(|e| format!("Enable error: {:?}", e));
     // sleep(Duration::from_millis(110));
+
+    ntp::Ntp::new();
 
     // radio.set_volume(Volume::Dbfsm28).map_err(|e| format!("Volume error: {:?}", e));
     // radio.set_deemphasis(DeEmphasis::Us50).map_err(|e| format!("Deemphasis error: {:?}", e));
