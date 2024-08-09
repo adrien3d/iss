@@ -1,16 +1,21 @@
 use anyhow::{bail, Result};
+// use esp_idf_hal::delay::FreeRtos;
 use esp_idf_svc::{
     eventloop::EspSystemEventLoop,
     hal::peripheral,
+    sntp::{EspSntp, SyncStatus},
     wifi::{AuthMethod, BlockingWifi, ClientConfiguration, Configuration, EspWifi},
 };
+use esp_idf_svc::nvs::{EspNvsPartition, NvsDefault};
 use log::info;
+use std::{thread::sleep, time::Duration};
 
 pub fn wifi(
     ssid: &str,
     pass: &str,
     modem: impl peripheral::Peripheral<P = esp_idf_svc::hal::modem::Modem> + 'static,
     sysloop: EspSystemEventLoop,
+    nvs_default_partition: EspNvsPartition<NvsDefault>
 ) -> Result<Box<EspWifi<'static>>> {
     let mut auth_method = AuthMethod::WPA2Personal;
     if ssid.is_empty() {
@@ -20,7 +25,7 @@ pub fn wifi(
         auth_method = AuthMethod::None;
         info!("Wifi password is empty");
     }
-    let mut esp_wifi = EspWifi::new(modem, sysloop.clone(), None)?;
+    let mut esp_wifi = EspWifi::new(modem, sysloop.clone(), Some(nvs_default_partition))?;
 
     let mut wifi = BlockingWifi::wrap(&mut esp_wifi, sysloop)?;
 
@@ -72,7 +77,23 @@ pub fn wifi(
 
     let ip_info = wifi.wifi().sta_netif().get_ip_info()?;
 
-    info!("Wifi DHCP info: {:?}", ip_info);
+    info!("Wifi Connected: DHCP info: {:?}", ip_info);
+
+    // Synchronize NTP
+    println!("Synchronizing with NTP Server");
+    match EspSntp::new_default() {
+        Ok(ntp) => {
+            for i in 1..=10 {
+                if ntp.get_sync_status() == SyncStatus::Completed {
+                    info!("NTP Time Sync Completed");
+                    break;
+                }
+                sleep(Duration::from_millis(100));
+                info!("NTP Time Sync not done in a sec");
+            } 
+        },
+        Err(err) => info!("NTP Time Sync not done in a sec"),
+    }
 
     Ok(Box::new(esp_wifi))
 }

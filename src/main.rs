@@ -146,6 +146,7 @@ fn main() -> Result<()> {
         app_config.wifi_psk,
         peripherals.modem,
         sysloop,
+        nvs_default_partition
     )?;
     // let mut radio = Si4703::new(i2c);
     // radio.enable_oscillator().map_err(|e| format!("Enable oscillator error: {:?}", e));
@@ -274,6 +275,14 @@ fn main() -> Result<()> {
 
     loop {
         info!("tick");
+        // Obtain System Time
+        let st_now = SystemTime::now();
+        // Convert to UTC Time
+        let dt_now_utc: DateTime<Utc> = st_now.clone().into();
+        // Format Time String
+        let formatted = format!("{}", dt_now_utc.format("%d/%m/%Y %H:%M:%S"));
+        // Print Time
+        info!("{}", formatted);
         sleep(Duration::from_millis(1000));
     }
 }

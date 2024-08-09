@@ -21,6 +21,10 @@
 ### Resources
 [Radio Arduino Library](https://www.mathertel.de/Arduino/RadioLibrary.aspx)
 
+### Notes
+DevKitC6: UART left (SLABtoUART)
+CopyS3: USB Left or COM right (WCH USB Serial ?)
+
 # esp-idf-tea5767
 TEA5767 FM Stereo Radio Driver for esp-idf.
 
@@ -109,4 +113,3 @@ Refer to tea5767.h.
 
 # Reference   
 https://github.com/nopnop2002/esp-idf-fm-radio
-
