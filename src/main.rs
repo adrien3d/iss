@@ -69,7 +69,7 @@ fn main() -> Result<()> {
         Err(e) => panic!("Could't get namespace {:?}", e),
     };
 
-    let key_raw_struct: &str = "last_configuration";
+    let key_raw_struct: &str = "config";
     let key_raw_struct_data: &mut [u8] = &mut [0; 100];
     let mut last_configuration = LastConfiguration {
         last_source: "fm",
