@@ -1,4 +1,5 @@
 use anyhow::Result;
+use chrono::{DateTime, Utc};
 use core::str;
 use embedded_svc::{
     http::{Headers, Method},
@@ -24,7 +25,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     sync::{Arc, Mutex},
     thread::sleep,
-    time::Duration,
+    time::{Duration, SystemTime},
 };
 use tea5767::defs::{BandLimits, SoundMode, TEA5767};
 use wifi::wifi;
@@ -52,10 +53,10 @@ struct LastConfiguration<'a> {
     last_volume: u8,
 }
 
-struct ProgramAppState {
-    /// A Network Time Protocol used as a time source.
-    //ntp: ntp::Ntp,
-}
+// struct ProgramAppState {
+//     /// A Network Time Protocol used as a time source.
+//     //ntp: ntp::Ntp,
+// }
 
 const MAX_CONTROL_PAYLOAD_LEN: usize = 128;
 static CONTROL_RADIO_HTML: &str = include_str!("control-radio.html");
@@ -146,7 +147,7 @@ fn main() -> Result<()> {
         app_config.wifi_psk,
         peripherals.modem,
         sysloop,
-        nvs_default_partition
+        nvs_default_partition.clone()
     )?;
     // let mut radio = Si4703::new(i2c);
     // radio.enable_oscillator().map_err(|e| format!("Enable oscillator error: {:?}", e));
@@ -154,7 +155,7 @@ fn main() -> Result<()> {
     // radio.enable().map_err(|e| format!("Enable error: {:?}", e));
     // sleep(Duration::from_millis(110));
 
-    ntp::Ntp::new();
+    // ntp::Ntp::new();
 
     // radio.set_volume(Volume::Dbfsm28).map_err(|e| format!("Volume error: {:?}", e));
     // radio.set_deemphasis(DeEmphasis::Us50).map_err(|e| format!("Deemphasis error: {:?}", e));
@@ -274,7 +275,6 @@ fn main() -> Result<()> {
     warn!("Server awaiting connection");
 
     loop {
-        info!("tick");
         // Obtain System Time
         let st_now = SystemTime::now();
         // Convert to UTC Time
@@ -282,7 +282,7 @@ fn main() -> Result<()> {
         // Format Time String
         let formatted = format!("{}", dt_now_utc.format("%d/%m/%Y %H:%M:%S"));
         // Print Time
-        info!("{}", formatted);
+        info!("Time: {}", formatted);
         sleep(Duration::from_millis(1000));
     }
 }

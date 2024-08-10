@@ -83,16 +83,10 @@ pub fn wifi(
     println!("Synchronizing with NTP Server");
     match EspSntp::new_default() {
         Ok(ntp) => {
-            for i in 1..=10 {
-                if ntp.get_sync_status() == SyncStatus::Completed {
-                    info!("NTP Time Sync Completed");
-                    break;
-                }
-                sleep(Duration::from_millis(100));
-                info!("NTP Time Sync not done in a sec");
-            } 
+            while ntp.get_sync_status() != SyncStatus::Completed {}
+            info!("NTP Time Sync Completed");
         },
-        Err(err) => info!("NTP Time Sync not done in a sec"),
+        Err(err) => info!("NTP Time Sync not done in a sec:{:#?}", err),
     }
 
     Ok(Box::new(esp_wifi))
