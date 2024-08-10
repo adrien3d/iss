@@ -1,4 +1,5 @@
 use anyhow::Result;
+use chrono::{DateTime, Utc};
 use core::str;
 use embedded_svc::{
     http::{Headers, Method},
@@ -13,15 +14,18 @@ use esp_idf_svc::{
         prelude::*,
     },
     http::server::{Configuration, EspHttpServer},
+    nvs::*,
 };
 use log::{info, warn};
+mod ntp;
+use postcard::{from_bytes, to_vec};
 use radios::Station;
 use rgb_led::{RGB8, WS2812RMT};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::{
     sync::{Arc, Mutex},
     thread::sleep,
-    time::Duration,
+    time::{Duration, SystemTime},
 };
 use tea5767::defs::{BandLimits, SoundMode, TEA5767};
 use wifi::wifi;
@@ -42,6 +46,18 @@ struct FormData<'a> {
     is_webradio: bool,
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+struct LastConfiguration<'a> {
+    last_source: &'a str,
+    last_station: &'a str,
+    last_volume: u8,
+}
+
+// struct ProgramAppState {
+//     /// A Network Time Protocol used as a time source.
+//     //ntp: ntp::Ntp,
+// }
+
 const MAX_CONTROL_PAYLOAD_LEN: usize = 128;
 static CONTROL_RADIO_HTML: &str = include_str!("control-radio.html");
 
@@ -49,19 +65,48 @@ fn main() -> Result<()> {
     esp_idf_svc::sys::link_patches();
     esp_idf_svc::log::EspLogger::initialize_default();
 
+    let nvs_default_partition: EspNvsPartition<NvsDefault> = EspDefaultNvsPartition::take()?;
+
+    let test_namespace = "test_ns";
+    let nvs = match EspNvs::new(nvs_default_partition.clone(), test_namespace, true) {
+        Ok(nvs) => {
+            info!("Got namespace {:?} from default partition", test_namespace);
+            nvs
+        }
+        Err(e) => panic!("Could't get namespace {:?}", e),
+    };
+
+    let key_raw_struct: &str = "config";
+    let key_raw_struct_data: &mut [u8] = &mut [0; 100];
+    let mut last_configuration = LastConfiguration {
+        last_source: "fm",
+        last_station: "france_info",
+        last_volume: 50,
+    };
+
+    match nvs.get_raw(key_raw_struct, key_raw_struct_data) {
+        Ok(v) => {
+            if let Some(the_struct) = v {
+                info!(
+                    "{:?} = {:#?}",
+                    key_raw_struct,
+                    from_bytes::<LastConfiguration>(the_struct)
+                );
+                match from_bytes::<LastConfiguration>(the_struct) {
+                    Ok(res) => last_configuration = res,
+                    Err(e) => warn!("Converting {:#?} failed because: {:?}", the_struct, e),
+                }
+            }
+        }
+        Err(e) => warn!("Couldn't get key {} because {:?}", key_raw_struct, e),
+    };
+
     let peripherals = Peripherals::take().unwrap();
     let sysloop = EspSystemEventLoop::take()?;
 
     let app_config = CONFIG;
 
-    let _wifi = wifi(
-        app_config.wifi_ssid,
-        app_config.wifi_psk,
-        peripherals.modem,
-        sysloop,
-    )?;
     info!("Pre led");
-
     // Wrap the led in an Arc<Mutex<...>>
     let led = Arc::new(Mutex::new(WS2812RMT::new(
         peripherals.pins.gpio8,
@@ -83,14 +128,34 @@ fn main() -> Result<()> {
     let config = I2cConfig::new().baudrate(400.kHz().into());
     let i2c = I2cDriver::new(peripherals.i2c0, sda, scl, &config)?;
 
+    let default_station_frequency =
+        // Station::get_fm_frequency_from_id("france_info").unwrap_or(105.5);
+        Station::get_fm_frequency_from_id(last_configuration.last_station).unwrap_or(105.5);
+
     let radio_tuner = Arc::new(Mutex::new(
-        TEA5767::new(i2c, 103.9, BandLimits::EuropeUS, SoundMode::Stereo).unwrap(),
+        TEA5767::new(
+            i2c,
+            default_station_frequency,
+            BandLimits::EuropeUS,
+            SoundMode::Stereo,
+        )
+        .unwrap(),
     ));
+
+    let _wifi = wifi(
+        app_config.wifi_ssid,
+        app_config.wifi_psk,
+        peripherals.modem,
+        sysloop,
+        nvs_default_partition.clone()
+    )?;
     // let mut radio = Si4703::new(i2c);
     // radio.enable_oscillator().map_err(|e| format!("Enable oscillator error: {:?}", e));
     // sleep(Duration::from_millis(500));
     // radio.enable().map_err(|e| format!("Enable error: {:?}", e));
     // sleep(Duration::from_millis(110));
+
+    // ntp::Ntp::new();
 
     // radio.set_volume(Volume::Dbfsm28).map_err(|e| format!("Volume error: {:?}", e));
     // radio.set_deemphasis(DeEmphasis::Us50).map_err(|e| format!("Deemphasis error: {:?}", e));
@@ -136,9 +201,12 @@ fn main() -> Result<()> {
         let mut resp = req.into_ok_response()?;
 
         if let Ok(form) = serde_json::from_slice::<FormData>(&buf) {
-            let station_name = Station::get_name(form.station);
+            let station_name = Station::get_name_from_id(form.station);
+            let last_source: &str;
+            let last_station: &str = form.station;
             if !form.is_webradio {
-                let fm_frequency = Station::get_fm_frequency(form.station);
+                last_source = "fm";
+                let fm_frequency = Station::get_fm_frequency_from_id(form.station);
                 match fm_frequency {
                     Some(freq) => {
                         let mut radio_tuner = radio_tuner_clone
@@ -148,6 +216,7 @@ fn main() -> Result<()> {
                             .set_frequency(freq)
                             .map_err(|_| anyhow::anyhow!("Failed to set radio tuner frequency"))?;
                         info!("FM Radio set to: {:?}, frequency:{}", form, freq);
+
                         let mut led = led_clone.lock().unwrap();
                         let _ = led.set_pixel(RGB8::new(0, 0, 0));
                         sleep(Duration::from_millis(100));
@@ -156,7 +225,8 @@ fn main() -> Result<()> {
                     None => warn!("FM Radio {:?} [{:?}] not found", station_name, form),
                 }
             } else {
-                let station_url = Station::get_web_url(form.station);
+                last_source = "webradio";
+                let station_url = Station::get_web_url_from_id(form.station);
                 match station_url {
                     Some(url) => {
                         info!("WebRadio set to: {:?}, URL:{}", form, url);
@@ -164,6 +234,23 @@ fn main() -> Result<()> {
                     None => warn!("Webradio {:?} [{:?}] not found", station_name, form),
                 }
             }
+            let key_raw_struct_data = LastConfiguration {
+                last_source,
+                last_station,
+                last_volume: 50,
+            };
+            let mut nvs_clone =
+                EspNvs::new(nvs_default_partition.clone(), test_namespace, true).unwrap();
+            nvs_clone
+                .set_str("last_station", form.station)
+                .expect("Failed to set last_station at runtime");
+            match nvs_clone.set_raw(
+                key_raw_struct,
+                &to_vec::<LastConfiguration, 100>(&key_raw_struct_data).unwrap(),
+            ) {
+                Ok(_) => info!("Key {} updated", key_raw_struct),
+                Err(e) => info!("key {} not updated {:?}", key_raw_struct, e),
+            };
             write!(
                 resp,
                 "Requested {} station and {} webradio",
@@ -185,10 +272,17 @@ fn main() -> Result<()> {
     // radio_tuner.set_soft_mute();
     // radio_tuner.search_up();
 
-    println!("Server awaiting connection");
+    warn!("Server awaiting connection");
 
     loop {
-        info!("tick");
+        // Obtain System Time
+        let st_now = SystemTime::now();
+        // Convert to UTC Time
+        let dt_now_utc: DateTime<Utc> = st_now.clone().into();
+        // Format Time String
+        let formatted = format!("{}", dt_now_utc.format("%d/%m/%Y %H:%M:%S"));
+        // Print Time
+        info!("Time: {}", formatted);
         sleep(Duration::from_millis(1000));
     }
 }
