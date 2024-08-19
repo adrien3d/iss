@@ -8,7 +8,7 @@ use esp_idf_svc::{
 };
 use esp_idf_svc::nvs::{EspNvsPartition, NvsDefault};
 use log::info;
-use std::{thread::sleep, time::Duration};
+// use std::{thread::sleep, time::Duration};
 
 pub fn wifi(
     ssid: &str,
